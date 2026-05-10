@@ -1,5 +1,16 @@
 # Financial MLOps Pipeline
 
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python" />
+  <img src="https://img.shields.io/badge/Apache_Airflow-017CEE?style=for-the-badge&logo=Apache-Airflow&logoColor=white" alt="Airflow" />
+  <img src="https://img.shields.io/badge/PyTorch-EE4C2C?style=for-the-badge&logo=pytorch&logoColor=white" alt="PyTorch" />
+  <img src="https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=FastAPI&logoColor=white" alt="FastAPI" />
+  <img src="https://img.shields.io/badge/MongoDB-4EA94B?style=for-the-badge&logo=mongodb&logoColor=white" alt="MongoDB" />
+  <img src="https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker" />
+  <img src="https://img.shields.io/badge/GitHub_Actions-2088FF?style=for-the-badge&logo=github-actions&logoColor=white" alt="GitHub Actions" />
+</p>
+
+
 ## Project Overview
 
 This repository contains an automated, end-to-end Machine Learning Operations (MLOps) pipeline designed for stock price prediction and financial market analysis. The system automates the complete lifecycle of a Deep Learning model, ranging from daily data ingestion and feature engineering to continuous model retraining, experiment tracking, and real-time deployment via an API interface.
@@ -7,6 +18,70 @@ This repository contains an automated, end-to-end Machine Learning Operations (M
 Built around predicting equity data (specifically focused on BBCA.JK tickers as default), this project serves as a blueprint for enterprise-grade ML orchestration using Docker containerization, workflow managers, and cloud data warehouses.
 
 ## Key Architecture Features
+
+```mermaid
+flowchart TB
+    %% Styling Configuration
+    classDef data fill:#e0f7fa,stroke:#0277bd,stroke-width:2px,color:#000
+    classDef orchestrator fill:#fce4ec,stroke:#c2185b,stroke-width:2px,color:#000
+    classDef ml fill:#fff3e0,stroke:#ef6c00,stroke-width:2px,color:#000
+    classDef api fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,color:#000
+    classDef ci fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px,color:#000
+    classDef external fill:#eceff1,stroke:#546e7a,stroke-width:2px,color:#000,stroke-dasharray: 5 5
+
+    %% Nodes
+    Yahoo(["fa:fa-globe Yahoo Finance API"])
+    
+    subgraph Data Pipeline
+        Ingest["fab:fa-python Data Ingestion Script"]
+        Mongo[("fas:fa-database MongoDB Atlas")]
+    end
+    
+    subgraph Orchestration
+        Airflow(("fas:fa-wind Apache Airflow DAGs"))
+    end
+    
+    subgraph Machine Learning Pipeline
+        Train["fas:fa-brain PyTorch LSTM Model"]
+        MLflow[["fas:fa-chart-line MLflow (DagsHub)"]]
+    end
+    
+    subgraph Deployment & Serving
+        FastAPI{"fas:fa-bolt FastAPI Server"}
+        Client(["fas:fa-user End User / Client"])
+    end
+    
+    subgraph CI/CD & Infrastructure
+        GitHub["fab:fa-github GitHub Actions"]
+        Docker["fab:fa-docker Docker & GHCR"]
+    end
+    
+    %% Relationships
+    Yahoo -->|"Raw Equity Data"| Ingest
+    Ingest -->|"Stores Features"| Mongo
+    
+    Airflow -.->|"Triggers Schedule"| Ingest
+    Airflow -.->|"Conditional Retraining"| Train
+    
+    Mongo -->|"Historical Data"| Train
+    Train -->|"Logs Metrics & Weights"| MLflow
+    Train -->|"Deploys Best Model"| FastAPI
+    
+    FastAPI -->|"JSON Predictions"| Client
+    
+    GitHub -->|"Automated Testing"| Docker
+    Docker -.->|"Containerizes"| Airflow
+    Docker -.->|"Containerizes"| FastAPI
+
+    %% Apply Styles
+    class Yahoo,Client external
+    class Ingest,Mongo data
+    class Airflow orchestrator
+    class Train,MLflow ml
+    class FastAPI api
+    class GitHub,Docker ci
+```
+
 
 *   **Automated Ingestion:** Automated fetching of market data via `yfinance` with persistence layer managed in MongoDB Atlas.
 *   **Deep Learning Forecasting:** Implements an LSTM (Long Short-Term Memory) neural network architecture built with PyTorch for temporal pattern recognition.
