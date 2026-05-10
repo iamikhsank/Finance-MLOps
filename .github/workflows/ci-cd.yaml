@@ -1,0 +1,63 @@
+name: Finance MLOps CI/CD
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Run Tests
+        run: |
+          # Normally you'd run pytest here. Since this is an initial setup without explicit tests yet, we'll just check if the model compiles.
+          echo "Running tests..."
+          python -c "from ml_service.src.model import StockLSTM; model = StockLSTM(); print('Model instantiated successfully')"
+
+  build-and-push:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and push API image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: ./Dockerfile.api
+          push: true
+          tags: ${{ secrets.DOCKER_USERNAME }}/finance-mlops-api:latest
+
+      - name: Build and push Airflow image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: ./Dockerfile.airflow
+          push: true
+          tags: ${{ secrets.DOCKER_USERNAME }}/finance-mlops-airflow:latest

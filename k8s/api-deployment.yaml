@@ -1,0 +1,25 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: finance-api-deployment
+  labels:
+    app: finance-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: finance-api
+  template:
+    metadata:
+      labels:
+        app: finance-api
+    spec:
+      containers:
+      - name: finance-api
+        image: finance-mlops-api:latest
+        imagePullPolicy: Never # Use local docker image
+        ports:
+        - containerPort: 8000
+        envFrom:
+        - secretRef:
+            name: finance-api-secrets # You must create this secret for .env vars
