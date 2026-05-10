@@ -36,15 +36,23 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
+    permissions:
+      packages: write
+      contents: read
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Log in to Docker Hub
+      - name: Log in to GitHub Container Registry
         uses: docker/login-action@v2
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Downcase repo name
+        run: |
+          echo "REPO_NAME=${GITHUB_REPOSITORY,,}" >> ${GITHUB_ENV}
 
       - name: Build and push API image
         uses: docker/build-push-action@v4
@@ -52,7 +60,7 @@ jobs:
           context: .
           file: ./Dockerfile.api
           push: true
-          tags: ${{ secrets.DOCKER_USERNAME }}/finance-mlops-api:latest
+          tags: ghcr.io/${{ env.REPO_NAME }}/api:latest
 
       - name: Build and push Airflow image
         uses: docker/build-push-action@v4
@@ -60,4 +68,4 @@ jobs:
           context: .
           file: ./Dockerfile.airflow
           push: true
-          tags: ${{ secrets.DOCKER_USERNAME }}/finance-mlops-airflow:latest
+          tags: ghcr.io/${{ env.REPO_NAME }}/airflow:latest
