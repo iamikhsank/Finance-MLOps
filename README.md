@@ -149,19 +149,30 @@ Finance-MLOps/
 │   └── src/
 │       ├── db_helper.py     # MongoDB persistence utility wrappers
 │       └── ingest.py        # Financial data extraction logic
+├── eda/
+│   ├── 01_eda_and_feature_engineering.ipynb # Jupyter notebook for EDA
+│   └── 01_eda_and_feature_engineering.py    # Python script for EDA
+├── eda_plots/               # Generated exploratory data analysis plots
+├── k8s/
+│   ├── api-deployment.yaml  # Kubernetes deployment manifest for API
+│   └── api-service.yaml     # Kubernetes service manifest for API
 ├── ml_service/
 │   └── src/
 │       ├── model.py         # PyTorch LSTM Neural Network definition
 │       ├── train.py         # Model fitting, MLflow logging, and Memory Optimization
 │       ├── evaluate.py      # Statistical KS Drift Test and MSE validation
 │       └── alerting.py      # Automated SMTP push notification engine
+├── models/
+│   ├── lstm_model.pth       # Serialized PyTorch model weights
+│   └── scaler.pkl           # Scikit-learn feature scaler
 ├── test_alert.py            # CLI utility for verifying SMTP configurations
 ├── Dockerfile.airflow       # Airflow environment specification
 ├── Dockerfile.api           # FastAPI server specification
 ├── Dockerfile.frontend      # Nginx web serving environment
 ├── docker-compose.yml       # Multi-container orchestration definitions
 ├── requirements.txt         # Explicit Python dependencies (Strict Versioning)
-└── .env                     # Configuration variables (Excluded from Version Control)
+├── .env                     # Configuration variables (Excluded from Version Control)
+└── .gitignore               # Git untracked files configuration
 ```
 
 ---

@@ -16,6 +16,7 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 import matplotlib.pyplot as plt
 import mlflow
+import joblib
 from dotenv import load_dotenv
 from alerting import send_email_alert
 
@@ -52,30 +53,56 @@ def load_and_preprocess(seq_length=60):
     dataset_path = "training_dataset.csv"
     df.to_csv(dataset_path, index=False)
     
-    # We will use 'Close' price for prediction
-    data_values = df['Close'].values.reshape(-1, 1)
+    # Define features
+    features = ['Close', 'SMA_14', 'RSI_14', 'MACD', 'BB_High', 'BB_Low']
+    
+    # Re-calculate technical indicators for the entire historical dataset
+    # This guarantees data integrity for older records that were ingested before the TA logic was added.
+    from ta.trend import SMAIndicator, MACD
+    from ta.momentum import RSIIndicator
+    from ta.volatility import BollingerBands
+    
+    print("Computing technical indicators for the full historical dataset...")
+    df['SMA_14'] = SMAIndicator(close=df["Close"], window=14, fillna=False).sma_indicator()
+    df['RSI_14'] = RSIIndicator(close=df["Close"], window=14, fillna=False).rsi()
+    df['MACD'] = MACD(close=df["Close"], fillna=False).macd()
+    
+    indicator_bb = BollingerBands(close=df["Close"], window=20, window_dev=2)
+    df['BB_High'] = indicator_bb.bollinger_hband()
+    df['BB_Low'] = indicator_bb.bollinger_lband()
+    
+    # Drop the initial rows (approx. 33) that naturally contain NaNs due to the rolling window calculation
+    initial_len = len(df)
+    df.dropna(subset=features, inplace=True)
+    print(f"Dropped {initial_len - len(df)} initial rows due to indicator rolling windows. Training on {len(df)} rows.")
+        
+    data_values = df[features].values
     
     # Free up memory
     del data
     del df
     gc.collect()
     
+    # Split train and test chronologically FIRST (80/20) to prevent Data Leakage
+    train_size = int(len(data_values) * 0.8)
+    train_data = data_values[:train_size]
+    test_data = data_values[train_size:]
+    
+    # Fit scaler ONLY on train data
     scaler = MinMaxScaler(feature_range=(0, 1))
-    scaled_data = scaler.fit_transform(data_values)
+    train_scaled = scaler.fit_transform(train_data)
+    test_scaled = scaler.transform(test_data)
     
-    X, y = [], []
-    for i in range(seq_length, len(scaled_data)):
-        X.append(scaled_data[i-seq_length:i, 0])
-        y.append(scaled_data[i, 0])
+    # Helper to generate sequences
+    def create_sequences(dataset, seq_length):
+        X, y = [], []
+        for i in range(seq_length, len(dataset)):
+            X.append(dataset[i-seq_length:i, :])
+            y.append(dataset[i, 0]) # Target is 'Close' (index 0)
+        return np.array(X), np.array(y)
         
-    X, y = np.array(X), np.array(y)
-    # Reshape for LSTM: (samples, time steps, features)
-    X = np.reshape(X, (X.shape[0], X.shape[1], 1))
-    
-    # Split train and test (80/20)
-    train_size = int(len(X) * 0.8)
-    X_train, X_test = X[:train_size], X[train_size:]
-    y_train, y_test = y[:train_size], y[train_size:]
+    X_train, y_train = create_sequences(train_scaled, seq_length)
+    X_test, y_test = create_sequences(test_scaled, seq_length)
     
     return X_train, y_train, X_test, y_test, scaler
 
@@ -99,7 +126,7 @@ def train_model():
     train_dataset = TensorDataset(X_train_t, y_train_t)
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     
-    model = StockLSTM(input_size=1, hidden_size=50, num_layers=2, output_size=1)
+    model = StockLSTM(input_size=6, hidden_size=50, num_layers=2, output_size=1)
     criterion = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     
@@ -148,8 +175,14 @@ def train_model():
             test_actual_scaled = y_test_t.numpy()
             
         # Inverse transform back to original price
-        test_preds = scaler.inverse_transform(test_preds_scaled)
-        test_actual = scaler.inverse_transform(test_actual_scaled)
+        # Since scaler was fit on 6 features, we need to pad the predictions to inverse transform
+        dummy = np.zeros((len(test_preds_scaled), 6))
+        dummy[:, 0] = test_preds_scaled[:, 0]
+        test_preds = scaler.inverse_transform(dummy)[:, 0]
+        
+        dummy_actual = np.zeros((len(test_actual_scaled), 6))
+        dummy_actual[:, 0] = test_actual_scaled[:, 0]
+        test_actual = scaler.inverse_transform(dummy_actual)[:, 0]
         
         # Calculate robust regression metrics
         mse = mean_squared_error(test_actual, test_preds)
@@ -202,27 +235,56 @@ def train_model():
         
         # Log image artifact to MLflow
         mlflow.log_artifact(plot_path)
-        if os.path.exists(plot_path):
-            os.remove(plot_path) # clean local temp file
             
         print("Logged enhanced metrics and prediction charts to MLflow.")
             
-        # Save model
+        # Save model and scaler locally
         os.makedirs('models', exist_ok=True)
         torch.save(model.state_dict(), 'models/lstm_model.pth')
+        joblib.dump(scaler, 'models/scaler.pkl')
+        
         # Log model to mlflow and register it
         mlflow.pytorch.log_model(
             model, 
             "lstm_model",
             registered_model_name="Finance_LSTM_Stock_Predictor"
         )
-        print("Model trained, saved locally, and registered to MLflow Model Registry.")
+        
+        # Log scaler artifact to MLflow
+        mlflow.log_artifact('models/scaler.pkl')
+        
+        print("Model and Scaler trained, saved locally, and registered to MLflow Model Registry.")
         
         # Send Alert
+        message_body = (
+            f"Finance-MLOps Model Retraining Completed Successfully.\n"
+            f"====================================================\n\n"
+            f"Run Name: {run_name}\n"
+            f"Ticker: {os.getenv('TICKER', 'BBCA.JK')}\n\n"
+            f"-- Performance Metrics --\n"
+            f"Price Accuracy:        {price_accuracy:.2f}%\n"
+            f"Directional Accuracy:  {directional_acc:.2f}%\n"
+            f"R2 Score:              {r2:.4f}\n"
+            f"MAE:                   {mae:.4f}\n"
+            f"RMSE:                  {rmse:.4f}\n"
+            f"MSE:                   {mse:.4f}\n\n"
+            f"-- Training Hyperparameters --\n"
+            f"Sequence Length:       {seq_length}\n"
+            f"Batch Size:            {batch_size}\n"
+            f"Epochs:                {num_epochs}\n"
+            f"Learning Rate:         {learning_rate}\n\n"
+            f"✅ The new Multivariate model and scaler versions have been automatically registered to MLflow Model Registry."
+        )
+        
         send_email_alert(
             subject="✅ Retraining Successful!",
-            message_body=f"Model retraining completed successfully.\n\nRun Name: {run_name}\nPrice Accuracy: {price_accuracy:.2f}%\nMSE: {mse:.4f}\n\nThe new model version has been automatically registered to MLflow."
+            message_body=message_body,
+            attachment_path=plot_path
         )
+        
+        # Clean up local temp file
+        if os.path.exists(plot_path):
+            os.remove(plot_path)
 
 if __name__ == "__main__":
     train_model()

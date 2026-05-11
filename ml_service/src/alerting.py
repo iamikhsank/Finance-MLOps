@@ -2,11 +2,12 @@ import os
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.image import MIMEImage
 from dotenv import load_dotenv
 
 load_dotenv()
 
-def send_email_alert(subject: str, message_body: str):
+def send_email_alert(subject: str, message_body: str, attachment_path: str = None):
     """
     Sends an email alert using Gmail SMTP.
     Requires GMAIL_USER and GMAIL_APP_PASSWORD in .env
@@ -28,6 +29,13 @@ def send_email_alert(subject: str, message_body: str):
         
         # Attach the body with UTF-8 encoding
         message.attach(MIMEText(message_body, 'plain', 'utf-8'))
+        
+        # Attach image if provided
+        if attachment_path and os.path.exists(attachment_path):
+            with open(attachment_path, 'rb') as fp:
+                img_data = fp.read()
+            image = MIMEImage(img_data, name=os.path.basename(attachment_path))
+            message.attach(image)
         
         # Connect to Gmail SMTP Server
         server = smtplib.SMTP('smtp.gmail.com', 587)

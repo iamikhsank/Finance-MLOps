@@ -10,6 +10,7 @@ from sklearn.preprocessing import MinMaxScaler
 import pandas as pd
 from typing import List
 import mlflow
+import joblib
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -30,25 +31,6 @@ async def lifespan(app: FastAPI):
     global model, scaler
     print("Starting up, loading model and scaler...")
     
-    # Initialize scaler
-    scaler = MinMaxScaler(feature_range=(0, 1))
-    
-    # Fetch some data from DB to fit the scaler
-    try:
-        db = MongoDBHelper()
-        ticker = os.getenv("TICKER", "BBCA.JK")
-        collection_name = os.getenv("COLLECTION_NAME", "stock_data")
-        data = db.get_all_data(collection_name, ticker)
-        db.close()
-        
-        if data:
-            df = pd.DataFrame(data)
-            prices = df['Close'].values.reshape(-1, 1)
-            scaler.fit(prices)
-            print("Scaler fitted on historical data.")
-    except Exception as e:
-        print(f"Could not initialize scaler from DB: {e}")
-
     # Setup MLflow credentials
     MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI")
     os.environ["MLFLOW_TRACKING_USERNAME"] = os.getenv("MLFLOW_TRACKING_USERNAME", "")
@@ -57,29 +39,44 @@ async def lifespan(app: FastAPI):
     if MLFLOW_TRACKING_URI:
         mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
 
-    # 1. Try to load from MLflow Model Registry
+    # 1. Try to load from MLflow Registry
     try:
         model_uri = "models:/Finance_LSTM_Stock_Predictor/latest"
         print(f"Attempting to load model from MLflow Registry: {model_uri}")
         model = mlflow.pytorch.load_model(model_uri)
         model.eval()
         print("Successfully loaded model from MLflow Registry.")
+        
+        # Download scaler artifact from the latest run
+        client = mlflow.tracking.MlflowClient()
+        latest_versions = client.get_latest_versions("Finance_LSTM_Stock_Predictor", stages=["None"])
+        if latest_versions:
+            run_id = latest_versions[0].run_id
+            scaler_path = mlflow.artifacts.download_artifacts(run_id=run_id, artifact_path="scaler.pkl")
+            scaler = joblib.load(scaler_path)
+            print("Successfully loaded scaler from MLflow Artifacts.")
+        else:
+            print("No latest version found in model registry for scaler.")
     except Exception as e:
         print(f"Could not load from MLflow Registry: {e}. Falling back to local file...")
         
     # 2. Fallback to local file if MLflow fetch failed
-    if model is None:
-        path_1 = os.path.join(os.path.dirname(__file__), '..', '..', 'ml_service', 'models', 'lstm_model.pth')
-        path_2 = os.path.join(os.path.dirname(__file__), '..', '..', 'models', 'lstm_model.pth')
-        model_path = path_1 if os.path.exists(path_1) else path_2
+    if model is None or scaler is None:
+        path_1 = os.path.join(os.path.dirname(__file__), '..', '..', 'ml_service', 'models')
+        path_2 = os.path.join(os.path.dirname(__file__), '..', '..', 'models')
+        models_dir = path_1 if os.path.exists(os.path.join(path_1, 'lstm_model.pth')) else path_2
         
-        if os.path.exists(model_path):
-            model = StockLSTM()
+        model_path = os.path.join(models_dir, 'lstm_model.pth')
+        scaler_path = os.path.join(models_dir, 'scaler.pkl')
+        
+        if os.path.exists(model_path) and os.path.exists(scaler_path):
+            model = StockLSTM(input_size=6)
             model.load_state_dict(torch.load(model_path))
             model.eval()
-            print(f"Model loaded successfully from local fallback: {model_path}")
+            scaler = joblib.load(scaler_path)
+            print(f"Model and Scaler loaded successfully from local fallback: {models_dir}")
         else:
-            print(f"Warning: Model file not found. Tried paths:\n - {path_1}\n - {path_2}\nPredictions will fail.")
+            print(f"Warning: Model or Scaler file not found. Predictions will fail.")
 
     yield # Server runs here
     # Optional cleanup logic would go here after yield
@@ -188,7 +185,15 @@ def predict(req: PredictionRequest = None):
             df = df.sort_values('Date')
             
         latest_data_points = df.tail(SEQ_LENGTH)
-        current_seq = latest_data_points['Close'].values.reshape(-1, 1)
+        
+        features = ['Close', 'SMA_14', 'RSI_14', 'MACD', 'BB_High', 'BB_Low']
+        
+        # Ensure all features exist in dataframe, if not fallback to Close only or dropna
+        for f in features:
+            if f not in latest_data_points.columns:
+                latest_data_points[f] = 0
+                
+        current_seq = latest_data_points[features].values
         last_close = float(current_seq[-1][0])
         
         last_date = latest_data_points['Date'].iloc[-1] if 'Date' in latest_data_points.columns else pd.Timestamp.now()
@@ -201,8 +206,8 @@ def predict(req: PredictionRequest = None):
         temp_date = last_date
         
         for i in range(days):
-            # Prep input: shape (1, seq_length, 1)
-            X = np.array(current_window[-SEQ_LENGTH:]).reshape(1, SEQ_LENGTH, 1)
+            # Prep input: shape (1, seq_length, num_features)
+            X = np.array(current_window[-SEQ_LENGTH:]).reshape(1, SEQ_LENGTH, 6)
             X_t = torch.tensor(X, dtype=torch.float32)
             
             # Predict
@@ -210,10 +215,16 @@ def predict(req: PredictionRequest = None):
                 pred_scaled_val = model(X_t).numpy()[0][0]
             
             # Inverse scaling
-            pred_price = float(scaler.inverse_transform([[pred_scaled_val]])[0][0])
+            dummy = np.zeros((1, 6))
+            dummy[0, 0] = pred_scaled_val
+            pred_price = float(scaler.inverse_transform(dummy)[0][0])
+            
+            # Static feature projection: hold technical features constant
+            last_features = current_window[-1].copy()
+            last_features[0] = pred_scaled_val # Update Close with prediction
             
             # Append predicted value back into the buffer for next iterations
-            current_window.append([pred_scaled_val])
+            current_window.append(last_features)
             
             # Increment Business Day (ignoring weekends roughly)
             temp_date += pd.tseries.offsets.BDay(1)
