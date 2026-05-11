@@ -12,6 +12,9 @@ from typing import List
 import mlflow
 import joblib
 from dotenv import load_dotenv
+from ta.trend import SMAIndicator, MACD
+from ta.momentum import RSIIndicator
+from ta.volatility import BollingerBands
 
 load_dotenv()
 
@@ -25,13 +28,12 @@ try:
 except ImportError:
     print("Warning: Could not import model or db_helper. Ensure PYTHONPATH is correct.")
 
-# Define lifespan handler
-@asynccontextmanager
-async def lifespan(app: FastAPI):
+def load_model_and_scaler():
     global model, scaler
-    print("Starting up, loading model and scaler...")
+    print("Loading model and scaler...")
+    new_model = None
+    new_scaler = None
     
-    # Setup MLflow credentials
     MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI")
     os.environ["MLFLOW_TRACKING_USERNAME"] = os.getenv("MLFLOW_TRACKING_USERNAME", "")
     os.environ["MLFLOW_TRACKING_PASSWORD"] = os.getenv("MLFLOW_TRACKING_PASSWORD", "")
@@ -39,29 +41,24 @@ async def lifespan(app: FastAPI):
     if MLFLOW_TRACKING_URI:
         mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
 
-    # 1. Try to load from MLflow Registry
     try:
         model_uri = "models:/Finance_LSTM_Stock_Predictor/latest"
         print(f"Attempting to load model from MLflow Registry: {model_uri}")
-        model = mlflow.pytorch.load_model(model_uri)
-        model.eval()
+        new_model = mlflow.pytorch.load_model(model_uri)
+        new_model.eval()
         print("Successfully loaded model from MLflow Registry.")
         
-        # Download scaler artifact from the latest run
         client = mlflow.tracking.MlflowClient()
         latest_versions = client.get_latest_versions("Finance_LSTM_Stock_Predictor", stages=["None"])
         if latest_versions:
             run_id = latest_versions[0].run_id
             scaler_path = mlflow.artifacts.download_artifacts(run_id=run_id, artifact_path="scaler.pkl")
-            scaler = joblib.load(scaler_path)
+            new_scaler = joblib.load(scaler_path)
             print("Successfully loaded scaler from MLflow Artifacts.")
-        else:
-            print("No latest version found in model registry for scaler.")
     except Exception as e:
         print(f"Could not load from MLflow Registry: {e}. Falling back to local file...")
         
-    # 2. Fallback to local file if MLflow fetch failed
-    if model is None or scaler is None:
+    if new_model is None or new_scaler is None:
         path_1 = os.path.join(os.path.dirname(__file__), '..', '..', 'ml_service', 'models')
         path_2 = os.path.join(os.path.dirname(__file__), '..', '..', 'models')
         models_dir = path_1 if os.path.exists(os.path.join(path_1, 'lstm_model.pth')) else path_2
@@ -70,15 +67,31 @@ async def lifespan(app: FastAPI):
         scaler_path = os.path.join(models_dir, 'scaler.pkl')
         
         if os.path.exists(model_path) and os.path.exists(scaler_path):
-            model = StockLSTM(input_size=6)
-            model.load_state_dict(torch.load(model_path))
-            model.eval()
-            scaler = joblib.load(scaler_path)
-            print(f"Model and Scaler loaded successfully from local fallback: {models_dir}")
+            try:
+                new_model = StockLSTM(input_size=6)
+                new_model.load_state_dict(torch.load(model_path))
+                new_model.eval()
+                new_scaler = joblib.load(scaler_path)
+                print(f"Model and Scaler loaded successfully from local fallback: {models_dir}")
+            except Exception as e2:
+                 print(f"Warning: Local fallback initialization failed: {e2}")
+                 return False
         else:
-            print(f"Warning: Model or Scaler file not found. Predictions will fail.")
+            print(f"Warning: Model or Scaler files not found.")
+            return False
+            
+    if new_model is not None and new_scaler is not None:
+        model = new_model
+        scaler = new_scaler
+        return True
+    return False
 
-    yield # Server runs here
+# Define lifespan handler
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    print("Starting up service lifecycle...")
+    load_model_and_scaler()
+    yield
     # Optional cleanup logic would go here after yield
 
 app = FastAPI(
@@ -155,6 +168,15 @@ def get_history(limit: int = 60):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/refresh-model")
+def refresh_model():
+    """Hot-reload of the model/scaler latest artifact from registry without downtime."""
+    success = load_model_and_scaler()
+    if success:
+        return {"status": "success", "message": "Model and scaler refreshed successfully."}
+    raise HTTPException(status_code=503, detail="Failed to refresh model. Check API server logs.")
+
+
 @app.post("/predict", response_model=PredictionResponse)
 def predict(req: PredictionRequest = None):
     global model, scaler
@@ -179,16 +201,16 @@ def predict(req: PredictionRequest = None):
             
         df = pd.DataFrame(data)
         
-        # Determine last date and sort properly
         if 'Date' in df.columns:
             df['Date'] = pd.to_datetime(df['Date'])
             df = df.sort_values('Date')
             
-        latest_data_points = df.tail(SEQ_LENGTH)
+        raw_closes = df['Close'].tolist()
         
         features = ['Close', 'SMA_14', 'RSI_14', 'MACD', 'BB_High', 'BB_Low']
         
-        # Ensure all features exist in dataframe, if not fallback to Close only or dropna
+        latest_data_points = df.tail(SEQ_LENGTH).copy()
+        
         for f in features:
             if f not in latest_data_points.columns:
                 latest_data_points[f] = 0
@@ -198,7 +220,6 @@ def predict(req: PredictionRequest = None):
         
         last_date = latest_data_points['Date'].iloc[-1] if 'Date' in latest_data_points.columns else pd.Timestamp.now()
         
-        # Setup loop for multistep forecasting
         scaled_input = scaler.transform(current_seq)
         current_window = scaled_input.tolist()
         
@@ -206,27 +227,32 @@ def predict(req: PredictionRequest = None):
         temp_date = last_date
         
         for i in range(days):
-            # Prep input: shape (1, seq_length, num_features)
             X = np.array(current_window[-SEQ_LENGTH:]).reshape(1, SEQ_LENGTH, 6)
             X_t = torch.tensor(X, dtype=torch.float32)
             
-            # Predict
             with torch.no_grad():
                 pred_scaled_val = model(X_t).numpy()[0][0]
             
-            # Inverse scaling
             dummy = np.zeros((1, 6))
             dummy[0, 0] = pred_scaled_val
             pred_price = float(scaler.inverse_transform(dummy)[0][0])
             
-            # Static feature projection: hold technical features constant
-            last_features = current_window[-1].copy()
-            last_features[0] = pred_scaled_val # Update Close with prediction
+            raw_closes.append(pred_price)
+            series_closes = pd.Series(raw_closes)
             
-            # Append predicted value back into the buffer for next iterations
-            current_window.append(last_features)
+            new_sma = SMAIndicator(close=series_closes, window=14, fillna=True).sma_indicator().iloc[-1]
+            new_rsi = RSIIndicator(close=series_closes, window=14, fillna=True).rsi().iloc[-1]
+            new_macd = MACD(close=series_closes, fillna=True).macd().iloc[-1]
             
-            # Increment Business Day (ignoring weekends roughly)
+            bb = BollingerBands(close=series_closes, window=20, window_dev=2)
+            new_bb_h = bb.bollinger_hband().iloc[-1]
+            new_bb_l = bb.bollinger_lband().iloc[-1]
+            
+            new_row_unscaled = np.array([pred_price, new_sma, new_rsi, new_macd, new_bb_h, new_bb_l]).reshape(1, -1)
+            new_row_scaled = scaler.transform(new_row_unscaled)[0]
+            
+            current_window.append(new_row_scaled.tolist())
+            
             temp_date += pd.tseries.offsets.BDay(1)
             
             forecasts.append({

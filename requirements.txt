@@ -17,3 +17,4 @@ jupyter==1.0.0
 pytest==8.0.2
 httpx
 scipy==1.12.0
+optuna
