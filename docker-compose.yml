@@ -14,6 +14,8 @@ x-airflow-common:
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
     PYTHONPATH: '/opt/airflow'
+  env_file:
+    - .env
   volumes:
     - ./dags:/opt/airflow/dags
     - ./data_pipeline:/opt/airflow/data_pipeline
@@ -85,3 +87,13 @@ services:
       - ./data_pipeline:/app/data_pipeline
     depends_on:
       - postgres
+
+  frontend-dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "8081:80"
+    depends_on:
+      - fastapi-app
+

@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Stock Predictor | Finance MLOps</title>
+    <meta name="description" content="Interactive AI Dashbord for real-time financial forecasts.">
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <div class="background-blur"></div>
+    
+    <main class="container">
+        <header class="header glass-panel">
+            <div class="logo-section">
+                <div class="logo-icon">
+                    <i class="fa-solid fa-chart-line"></i>
+                </div>
+                <div class="logo-text">
+                    <h1>Predictor<span class="highlight">AI</span></h1>
+                    <span class="subtitle">Finance MLOps Pipeline</span>
+                </div>
+            </div>
+            <div class="status-badge" id="apiStatus">
+                <span class="status-dot"></span>
+                <span id="statusText">Checking System...</span>
+            </div>
+        </header>
+
+        <section class="main-grid">
+            <!-- Summary Cards -->
+            <div class="dashboard-summary">
+                <div class="stat-card glass-panel">
+                    <div class="stat-label">Stock Ticker</div>
+                    <div class="stat-value" id="tickerValue">BBCA.JK</div>
+                    <div class="stat-footer"><i class="fa-solid fa-building-columns"></i> Bank Central Asia</div>
+                </div>
+
+                <div class="stat-card glass-panel prediction-card">
+                    <div class="stat-label">AI Predicted Price</div>
+                    <div class="stat-value highlighted-value" id="predictedPrice">--</div>
+                    <div class="stat-footer" id="predictionFooter">Pending trigger</div>
+                </div>
+
+                <div class="stat-card glass-panel">
+                    <div class="stat-label">Last Close</div>
+                    <div class="stat-value" id="lastClosePrice">--</div>
+                    <div class="stat-footer" id="lastCloseDate">Awaiting data</div>
+                </div>
+            </div>
+
+            <!-- Chart Container -->
+            <div class="chart-section glass-panel">
+                <div class="panel-header">
+                    <h2><i class="fa-solid fa-timeline"></i> Historical Performance & Projection</h2>
+                    <div class="controls">
+                        <button id="refreshBtn" class="btn secondary-btn"><i class="fa-solid fa-rotate"></i> Sync</button>
+                    </div>
+                </div>
+                <div class="chart-wrapper">
+                    <canvas id="stockChart"></canvas>
+                    <div id="chartLoader" class="loader">
+                        <div class="spinner"></div>
+                        <p>Loading Analytics...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Action & Info -->
+            <div class="actions-section glass-panel">
+                <h3>Model Controller</h3>
+                <p class="description">Execute an immediate inferencing cycle using the latest LSTM deep learning model registered in MLflow.</p>
+                
+                <div class="action-controls">
+                    <div class="control-group">
+                        <label for="predictDays">Forecast Horizon (Days)</label>
+                        <div class="input-wrapper">
+                            <input type="number" id="predictDays" value="1" min="1" max="30">
+                            <span class="input-suffix">Days</span>
+                        </div>
+                    </div>
+                    
+                    <button id="predictBtn" class="btn primary-btn">
+                        <span>Run Prediction</span>
+                        <i class="fa-solid fa-bolt"></i>
+                    </button>
+
+                    <button id="downloadBtn" class="btn secondary-btn ghost-btn" disabled>
+                        <i class="fa-solid fa-file-arrow-down"></i>
+                        <span>Download Forecast Data</span>
+                    </button>
+                </div>
+
+                <div class="info-box">
+                    <div class="info-header"><i class="fa-solid fa-circle-info"></i> System Info</div>
+                    <ul class="info-list">
+                        <li><span class="label">Architecture:</span> <span class="value">PyTorch LSTM</span></li>
+                        <li><span class="label">Sequence Length:</span> <span class="value">60 Days</span></li>
+                        <li><span class="label">Backend:</span> <span class="value">FastAPI & MongoDB</span></li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+
+        <footer class="footer">
+            <p>&copy; 2026 Finance MLOps Suite. Powered by Antigravity.</p>
+        </footer>
+    </main>
+
+    <script src="app.js"></script>
+</body>
+</html>

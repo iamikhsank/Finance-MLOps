@@ -1,4 +1,4 @@
-# Financial MLOps Pipeline
+# Enterprise Financial MLOps Pipeline
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python" />
@@ -6,195 +6,223 @@
   <img src="https://img.shields.io/badge/PyTorch-EE4C2C?style=for-the-badge&logo=pytorch&logoColor=white" alt="PyTorch" />
   <img src="https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=FastAPI&logoColor=white" alt="FastAPI" />
   <img src="https://img.shields.io/badge/MongoDB-4EA94B?style=for-the-badge&logo=mongodb&logoColor=white" alt="MongoDB" />
+  <img src="https://img.shields.io/badge/MLflow-0194E2?style=for-the-badge&logo=mlflow&logoColor=white" alt="MLflow" />
   <img src="https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker" />
   <img src="https://img.shields.io/badge/GitHub_Actions-2088FF?style=for-the-badge&logo=github-actions&logoColor=white" alt="GitHub Actions" />
 </p>
 
+---
 
-## Project Overview
+## 1. Executive Summary
 
-This repository contains an automated, end-to-end Machine Learning Operations (MLOps) pipeline designed for stock price prediction and financial market analysis. The system automates the complete lifecycle of a Deep Learning model, ranging from daily data ingestion and feature engineering to continuous model retraining, experiment tracking, and real-time deployment via an API interface.
+This repository contains the architecture and implementation of an automated, Enterprise-Grade Machine Learning Operations (MLOps) pipeline. Designed specifically for quantitative financial forecasting, the system orchestrates the complete lifecycle of a Deep Learning model—from automated market data ingestion and rigorous temporal modeling, to continuous evaluation, statistical drift detection, and low-latency prediction serving.
 
-Built around predicting equity data (specifically focused on BBCA.JK tickers as default), this project serves as a blueprint for enterprise-grade ML orchestration using Docker containerization, workflow managers, and cloud data warehouses.
+Currently calibrated for equity prediction (default ticker: `BBCA.JK`), the modular design pattern ensures horizontal scalability and adaptability to any continuous time-series regression task. The pipeline adheres to strict software engineering standards, integrating rigorous memory management, proactive monitoring, and automated containerized deployments.
 
-## Key Architecture Features
+---
+
+## 2. Core Architectural Components
+
+### 2.1. Deep Learning Engine (PyTorch)
+The core predictive capability is driven by a Long Short-Term Memory (LSTM) neural network. To ensure stability within resource-constrained production environments, the training pipeline utilizes PyTorch `DataLoader` for efficient mini-batch processing. Additionally, the system employs aggressive Python garbage collection (`gc.collect()`) and strict limitations on Intel MKL/OpenMP thread allocation, virtually eliminating the risk of Out-Of-Memory (OOM) anomalies during large-scale matrix operations.
+
+### 2.2. Proactive Statistical Data Drift Detection
+Financial markets exhibit extreme non-stationarity. To maintain predictive integrity, the evaluation module executes a two-sample **Kolmogorov-Smirnov (KS) Test** (`scipy.stats.ks_2samp`) on a daily cadence. The system isolates the trailing 30-day market distribution (current data) and mathematically compares it against the foundational distribution utilized during model training (reference data). If the test yields a P-Value of `< 0.05`, the system concludes that statistically significant data drift has occurred and preemptively triggers a retraining protocol before standard performance metrics decay.
+
+### 2.3. Automated Model Registry & Experiment Tracking
+The pipeline leverages **MLflow** hosted via DagsHub as the centralized source of truth for model lineage. Upon successful training, models are not merely saved locally; they are serialized and registered into the MLflow Model Registry under a unified identifier (`Finance_LSTM_Stock_Predictor`). The registry automatically handles versioning, logs deterministic hyperparameters, records loss metrics, and archives validation plots as persistent artifacts.
+
+### 2.4. Real-Time SMTP Alerting Service
+To eliminate the requirement for constant manual dashboard monitoring, a custom asynchronous alerting module (`alerting.py`) is integrated into the orchestration flow. Utilizing authenticated SMTP protocols, the system dispatches immediate operational notifications to designated engineering endpoints. Alerts are triggered upon the detection of Data Drift, the breach of Mean Squared Error (MSE) thresholds (Concept Drift), or upon the successful compilation and registration of a new model version.
+
+### 2.5. Scalable Deployment & Continuous Integration
+Prediction serving is decoupled from the modeling layer via a **FastAPI** application. Upon instantiation, the API dynamic fetches the latest production-approved model directly from the MLflow Registry, ensuring the serving layer is always utilizing the most optimal weights. The entire infrastructure—including Apache Airflow schedulers, PostgreSQL metadata databases, and the FastAPI application—is containerized via **Docker Compose**. Integrity is guaranteed by a **GitHub Actions** CI/CD pipeline which automatically tests dependencies and pushes immutable container images to the GitHub Container Registry (GHCR).
+
+---
+
+## 3. Comprehensive System Architecture Diagram
 
 ```mermaid
 flowchart TB
-    %% Styling Configuration
-    classDef data fill:#e0f7fa,stroke:#0277bd,stroke-width:2px,color:#000
-    classDef orchestrator fill:#fce4ec,stroke:#c2185b,stroke-width:2px,color:#000
-    classDef ml fill:#fff3e0,stroke:#ef6c00,stroke-width:2px,color:#000
-    classDef api fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,color:#000
-    classDef ci fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px,color:#000
-    classDef external fill:#eceff1,stroke:#546e7a,stroke-width:2px,color:#000,stroke-dasharray: 5 5
+    classDef external fill:#f8f9fa,stroke:#ced4da,stroke-width:2px,color:#212529,stroke-dasharray: 5 5
+    classDef storage fill:#e3f2fd,stroke:#1565c0,stroke-width:2px,color:#0d47a1
+    classDef compute fill:#fff3e0,stroke:#e65100,stroke-width:2px,color:#e65100
+    classDef orchestration fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#4a148c
+    classDef serving fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px,color:#1b5e20
+    classDef monitoring fill:#ffebee,stroke:#b71c1c,stroke-width:2px,color:#b71c1c
+    classDef cicd fill:#e0f2f1,stroke:#00695c,stroke-width:2px,color:#00695c
 
-    %% Nodes
-    Yahoo(["fa:fa-globe Yahoo Finance API"])
-    
-    subgraph Data Pipeline
-        Ingest["fab:fa-python Data Ingestion Script"]
-        Mongo[("fas:fa-database MongoDB Atlas")]
-    end
-    
-    subgraph Orchestration
-        Airflow(("fas:fa-wind Apache Airflow DAGs"))
-    end
-    
-    subgraph Machine Learning Pipeline
-        Train["fas:fa-brain PyTorch LSTM Model"]
-        MLflow[["fas:fa-chart-line MLflow (DagsHub)"]]
-    end
-    
-    subgraph Deployment & Serving
-        FastAPI{"fas:fa-bolt FastAPI Server"}
-        Client(["fas:fa-user End User / Client"])
-    end
-    
-    subgraph CI/CD & Infrastructure
-        GitHub["fab:fa-github GitHub Actions"]
-        Docker["fab:fa-docker Docker & GHCR"]
-    end
-    
-    %% Relationships
-    Yahoo -->|"Raw Equity Data"| Ingest
-    Ingest -->|"Stores Features"| Mongo
-    
-    Airflow -.->|"Triggers Schedule"| Ingest
-    Airflow -.->|"Conditional Retraining"| Train
-    
-    Mongo -->|"Historical Data"| Train
-    Train -->|"Logs Metrics & Weights"| MLflow
-    Train -->|"Deploys Best Model"| FastAPI
-    
-    FastAPI -->|"JSON Predictions"| Client
-    
-    GitHub -->|"Automated Testing"| Docker
-    Docker -.->|"Containerizes"| Airflow
-    Docker -.->|"Containerizes"| FastAPI
+    %% External Sources
+    YahooFinance(["Yahoo Finance API (yfinance)"]):::external
+    ClientApplication(["Client Application / End User"]):::external
 
-    %% Apply Styles
-    class Yahoo,Client external
-    class Ingest,Mongo data
-    class Airflow orchestrator
-    class Train,MLflow ml
-    class FastAPI api
-    class GitHub,Docker ci
+    %% CI/CD Layer
+    subgraph Infrastructure & CI/CD Layer
+        GitHubRepo[("GitHub Repository\n(Source Code)")]:::cicd
+        GitHubActions[["GitHub Actions\n(Automated Testing & Build)"]]:::cicd
+        GHCR[("GitHub Container Registry\n(ghcr.io)")]:::cicd
+    end
+
+    %% Orchestration Layer
+    subgraph Orchestration Layer
+        DockerCompose(("Docker Compose Host\n(Production Server)")):::orchestration
+        AirflowScheduler(("Apache Airflow Scheduler\n(Cron Execution)")):::orchestration
+    end
+
+    %% Storage Layer
+    subgraph Storage Layer
+        MongoDB[("MongoDB Atlas\n(Time-Series Store)")]:::storage
+        MLflowRegistry[("MLflow Model Registry\n(Weights & Artifacts)")]:::storage
+    end
+
+    %% Compute & ML Layer
+    subgraph Computational Pipeline
+        Ingestion["Ingestion Module\n(db_helper.py / ingest.py)"]:::compute
+        Evaluation["Evaluation Module\n(evaluate.py)"]:::compute
+        KSTest["KS Statistical Test\n(Drift Detection)"]:::compute
+        Training["PyTorch Training Module\n(train.py)"]:::compute
+    end
+
+    %% Monitoring Layer
+    subgraph Monitoring Layer
+        AlertService{"SMTP Alert Service\n(alerting.py)"}:::monitoring
+    end
+
+    %% Serving Layer
+    subgraph Serving Layer
+        FastAPI{"FastAPI Inference Engine\n(main.py)"}:::serving
+        DashboardUI["Web Analytics Dashboard\n(Nginx / HTML)"]:::serving
+    end
+
+    %% CI/CD Flow
+    GitHubRepo -- "Push Event / Pull Request" --> GitHubActions
+    GitHubActions -- "Compiles Immutable Images" --> GHCR
+    GHCR == "Pulls Runtime Images" ===> DockerCompose
+    DockerCompose -- "Spawns Containers" --> AirflowScheduler
+    DockerCompose -- "Spawns Containers" --> FastAPI
+    DockerCompose -- "Spawns Containers" --> DashboardUI
+
+    %% Control Flow (Orchestration)
+    AirflowScheduler == "Triggers Daily" ===> Ingestion
+    AirflowScheduler == "Triggers Daily" ===> Evaluation
+
+    %% Data Flow
+    YahooFinance -. "Raw OHLCV Data" .-> Ingestion
+    Ingestion -- "Upsert Operation" --> MongoDB
+    
+    MongoDB -- "Batch History" --> Evaluation
+    Evaluation -- "Isolates 30-Day Window" --> KSTest
+    
+    %% Evaluation Logic
+    KSTest -- "P-Value < 0.05\n(Data Drift)" --> AlertService
+    KSTest -- "P-Value < 0.05\n(Data Drift)" --> Training
+    Evaluation -- "MSE > 0.05\n(Concept Drift)" --> AlertService
+    Evaluation -- "MSE > 0.05\n(Concept Drift)" --> Training
+    
+    %% Training Flow
+    MongoDB -- "Full Dataset" --> Training
+    Training -- "Serializes Model" --> MLflowRegistry
+    Training -- "Registration Success" --> AlertService
+    
+    %% Serving Flow
+    MLflowRegistry == "Dynamic Fetch (startup)" ===> FastAPI
+    FastAPI -- "CORS Response" --> DashboardUI
+    DashboardUI -- "Visualization" --> ClientApplication
 ```
 
+---
 
-*   **Automated Ingestion:** Automated fetching of market data via `yfinance` with persistence layer managed in MongoDB Atlas.
-*   **Deep Learning Forecasting:** Implements an LSTM (Long Short-Term Memory) neural network architecture built with PyTorch for temporal pattern recognition.
-*   **Experiment Tracking & Logging:** Integrated with MLflow via DagsHub to visualize loss metrics, track hyperparameters, and save weight checkpoints remotely.
-*   **Workflow Orchestration:** Utilizes Apache Airflow DAGs to conditionalize and run continuous data scraping, feature derivation, and adaptive retraining jobs.
-*   **Scalable Inference:** Uses FastAPI with Uvicorn to expose low-latency endpoints for real-time prediction serving.
-*   **Robust CI/CD:** Github Actions automated verification testing and direct building to the GitHub Container Registry (GHCR).
-
-## Technical Stack
-
-| Component | Technology Used |
-| :--- | :--- |
-| **Orchestrator** | Apache Airflow 2.8.1 |
-| **Machine Learning** | PyTorch, Scikit-Learn, TA (Technical Analysis Library) |
-| **API Layer** | FastAPI, Pydantic, Uvicorn |
-| **Database** | MongoDB Atlas (Production), PostgreSQL (Airflow Metadata) |
-| **Tracking** | MLflow Hosted via DagsHub |
-| **Containerization** | Docker, Docker Compose |
-| **CI/CD** | GitHub Actions, GHCR |
-| **Language** | Python 3.10 |
-
-## Directory Structure
+## 4. Repository Structure
 
 ```text
 Finance-MLOps/
-├── .github/workflows/       # CI/CD GitHub Actions Pipeline definition
+├── .github/workflows/       # CI/CD pipeline definitions
 ├── api/
-│   └── app/main.py          # FastAPI application entrypoint and routes
+│   └── app/main.py          # FastAPI application entrypoint (Registry integration)
+├── frontend/
+│   ├── index.html           # Dashboard structural markup
+│   ├── style.css            # Premium visual stylings
+│   └── app.js               # Analytics rendering orchestration
 ├── dags/
-│   └── mlops_pipeline.py    # Apache Airflow directed acyclic graph definition
+│   └── mlops_pipeline.py    # Apache Airflow directed acyclic graph architecture
 ├── data_pipeline/
 │   └── src/
 │       ├── db_helper.py     # MongoDB persistence utility wrappers
-│       └── ingest.py        # Data loading logics from financial sources
-├── eda/                     # Research notebooks and analysis scripts
-├── k8s/                     # Optional Kubernetes manifests for deployment scaling
+│       └── ingest.py        # Financial data extraction logic
 ├── ml_service/
 │   └── src/
-│       ├── model.py         # PyTorch LSTM Neural Net Architecture
-│       ├── train.py         # Fitting execution with MLflow tracking
-│       ├── evaluate.py      # Regression evaluation metrics compute
-│       └── retrain_loop.py  # Conditional logical flows for retraining
-├── models/                  # Local caching directory for artifacts
-├── Dockerfile.airflow       # Customized airflow execution environment
-├── Dockerfile.api           # Slim container for fast prediction serving
-├── docker-compose.yml       # Multi-service container configuration
-├── requirements.txt         # Application and framework dependencies
-└── .env                     # Environment variable store
+│       ├── model.py         # PyTorch LSTM Neural Network definition
+│       ├── train.py         # Model fitting, MLflow logging, and Memory Optimization
+│       ├── evaluate.py      # Statistical KS Drift Test and MSE validation
+│       └── alerting.py      # Automated SMTP push notification engine
+├── test_alert.py            # CLI utility for verifying SMTP configurations
+├── Dockerfile.airflow       # Airflow environment specification
+├── Dockerfile.api           # FastAPI server specification
+├── Dockerfile.frontend      # Nginx web serving environment
+├── docker-compose.yml       # Multi-container orchestration definitions
+├── requirements.txt         # Explicit Python dependencies (Strict Versioning)
+└── .env                     # Configuration variables (Excluded from Version Control)
 ```
 
-## Prerequisites
+---
 
-Ensure that the following prerequisites are installed locally before environment orchestration:
+## 5. Deployment Configuration
 
-1.  Docker and Docker Compose (v3.8+)
-2.  Git
-3.  A Valid MongoDB Atlas Connection String
-4.  A DagsHub account and MLflow token for Remote Tracking (Recommended)
+### 5.1. System Prerequisites
+Deployment requires the following dependencies installed on the host machine:
+* Docker Engine (v20.10+) and Docker Compose (v3.8+)
+* Python 3.10+ (Required only for local non-containerized execution)
+* Active MongoDB Atlas cluster and connection string
+* Authenticated DagsHub/MLflow account
 
-## Configuration Environment
-
-Create a `.env` file located at the root of the working repository with the following mandatory definitions:
+### 5.2. Environment Variable Specification
+Create a `.env` file at the root directory. The `docker-compose.yml` is configured to natively inject these variables into all corresponding containers.
 
 ```env
+# Database Parameters
 MONGO_URI=mongodb+srv://<user>:<pass>@cluster.mongodb.net/
 DB_NAME=finance_mlops
 COLLECTION_NAME=stock_data
+TICKER=BBCA.JK
 
+# MLflow / Registry Authentication
 MLFLOW_TRACKING_URI=https://dagshub.com/<username>/Finance-MLOps.mlflow
 MLFLOW_TRACKING_USERNAME=<username>
 MLFLOW_TRACKING_PASSWORD=<dagshub_token>
 
-TICKER=BBCA.JK
+# SMTP Alerting Configuration
+GMAIL_USER=your.email@gmail.com
+GMAIL_APP_PASSWORD=your_16_digit_app_password
+ALERT_RECEIVER_EMAIL=receiver.email@gmail.com
 ```
 
-## Running with Docker Compose
+### 5.3. Executing the Infrastructure via Docker Compose
+The entire infrastructure stack—comprising PostgreSQL for Airflow metadata, Airflow Init, Scheduler, Webserver, and the FastAPI application—is orchestrated via Docker Compose.
 
-The entire application infrastructure (PostgreSQL metadata db, Airflow Init, Webserver, Scheduler, and FastAPI server) is encapsulated into a cohesive `docker-compose` stack.
-
-### Step 1: Initialize Stack
-Verify connectivity and build relevant components locally:
+1. **Initialize the Airflow Database Schema:**
 ```bash
 docker-compose up airflow-init
 ```
-
-### Step 2: Execute Application Services
-Run the services simultaneously in detached daemon mode:
+2. **Launch Core Services (Detached Mode):**
 ```bash
 docker-compose up -d
 ```
+3. **Validate Operational Status:**
+- **Visual Analytics Dashboard:** `http://localhost:8081`
+- **Airflow Web Interface:** `http://localhost:8080` (Authentication: `airflow` / `airflow`)
+- **FastAPI Documentation (Swagger UI):** `http://localhost:8000/docs`
 
-### Step 3: Verify Accessible Dashboards
-Upon successful startup, the system maps default access to following hosts:
-*   **Airflow Webserver:** `http://localhost:8080` (Default User/Pass: `airflow` / `airflow`)
-*   **FastAPI (Auto-Docs):** `http://localhost:8000/docs`
+---
 
-## Application API Endpoints
+## 6. Continuous Integration & Continuous Deployment (CI/CD)
 
-Available primary routes provided by the FastAPI interface:
+The repository enforces strict CI/CD protocols utilizing **GitHub Actions**. Any modifications pushed to the `main` branch trigger the automated pipeline.
 
-*   `GET /` : Health confirmation and root availability.
-*   `POST /predict` : Takes financial lag sequence and executes inferential pass via current PyTorch artifact.
-*   `GET /history` : Returns metadata of cached dataset loads.
+1. **Test Phase:** The pipeline allocates a transient Ubuntu runner, provisions Python 3.10, installs dependencies, and verifies the compilation integrity of the PyTorch neural network.
+2. **Image Compilation:** Upon test validation, the pipeline executes isolated builds for `Dockerfile.api` and `Dockerfile.airflow`.
+3. **Registry Distribution:** The compiled, production-ready images are securely pushed to the GitHub Container Registry (GHCR), ensuring immutable deployment artifacts.
 
-## Continuous Integration / Continuous Deployment (CI/CD)
+---
 
-Automated software quality assurance is executed via GitHub Actions workflows, enforced upon merges or pull requests targeted at the `main` stable branch.
-
-The pipeline utilizes the following workflow cycle:
-1.  **Test Phase:** Validates dependencies integrity and performs module unit instantiation tests in temporary runner runners.
-2.  **Container Generation:** On successful tests, rebuilds standard Docker images derived from `Dockerfile.api` and `Dockerfile.airflow`.
-3.  **Registry Push:** Securely authenticates and pushes the container images directly onto the GitHub Container Registry (GHCR), hosted at `ghcr.io`.
-
-## License
-
-Distributed under the terms located within the included [LICENSE](file:///d:/Antigravity/Machine%20Learning%20Project/Finance-MLOps/LICENSE) file.
+## 7. License
+This intellectual property is distributed under the conditions explicitly stated within the included `LICENSE` file.

@@ -16,8 +16,8 @@ def fetch_data(ticker, start_date=None, end_date=None):
     stock = yf.Ticker(ticker)
     
     if start_date is None:
-        # If no start date, fetch max history (e.g., last 5 years)
-        df = stock.history(period="5y")
+        # If no start date, fetch max history (e.g., last 10 years)
+        df = stock.history(period="10y")
     else:
         df = stock.history(start=start_date, end=end_date)
         
